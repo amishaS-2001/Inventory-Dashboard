@@ -1,201 +1,105 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
   <title>Inventory Dashboard</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    body {
-      background: #f0f4f8;
-    }
-    .card {
-      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-    }
-    h1 {
-      color: #2c3e50;
-    }
-    .btn-primary {
-      background-color: #4e73df;
-      border-color: #4e73df;
-    }
-    .btn-primary:hover {
-      background-color: #375abb;
-      border-color: #375abb;
-    }
-  </style>
 </head>
-<body>
-
-  <div class="container mt-4">
-    <!-- Logout Button -->
-    <div class="d-flex justify-content-end">
-      <button class="btn btn-danger mb-3" onclick="logout()">Logout</button>
+<body class="bg-light">
+  <div class="container py-4">
+    <div class="d-flex justify-content-between mb-3">
+      <h2>Inventory Dashboard</h2>
+      <button class="btn btn-danger" onclick="logout()">Logout</button>
     </div>
 
-    <h1 class="text-center mb-4">📊 Inventory Dashboard</h1>
+    <form id="itemForm" class="row g-2 mb-4">
+      <div class="col-md-5"><input type="text" id="itemName" class="form-control" placeholder="Item name"></div>
+      <div class="col-md-4"><input type="number" id="quantity" class="form-control" placeholder="Quantity"></div>
+      <div class="col-md-3"><button class="btn btn-primary w-100" type="submit">Add Item</button></div>
+    </form>
 
-    <!-- Add Item -->
-    <div class="card p-4 mb-4">
-      <h4 class="mb-3">Add New Item</h4>
-      <form id="addItemForm">
-        <div class="row g-3">
-          <div class="col-md-6">
-            <input type="text" id="itemName" class="form-control" placeholder="Item Name" required>
-          </div>
-          <div class="col-md-4">
-            <input type="number" id="quantity" class="form-control" placeholder="Quantity" required>
-          </div>
-          <div class="col-md-2">
-            <button type="submit" class="btn btn-primary w-100">Add</button>
-          </div>
-        </div>
-      </form>
-    </div>
+    <canvas id="chartCanvas" height="100"></canvas>
 
-    <!-- Inventory Table -->
-    <div class="card p-4 mb-4">
-      <h4>Current Inventory</h4>
-      <table class="table table-hover mt-3">
-        <thead class="table-light">
-          <tr>
-            <th>ID</th>
-            <th>Item Name</th>
-            <th>Quantity</th>
-            <th>Last Updated</th>
-          </tr>
-        </thead>
-        <tbody id="inventoryBody"></tbody>
-      </table>
-    </div>
-
-    <!-- Chart Section -->
-    <div class="card p-4 mb-5">
-      <h4>Inventory Chart</h4>
-      <canvas id="inventoryChart" height="120"></canvas>
-    </div>
+    <table class="table table-bordered mt-4">
+      <thead><tr><th>ID</th><th>Item</th><th>Qty</th><th>Action</th></tr></thead>
+      <tbody id="inventoryTable"></tbody>
+    </table>
   </div>
 
   <script>
-    const apiUrl = "http://127.0.0.1:5000/inventory";  // Update to Render URL after deployment
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-      alert("You're not logged in. Redirecting to login...");
-      window.location.href = "login.html";
+    if (!localStorage.getItem("loggedIn")) {
+      location.href = "login.html";
     }
 
-    const ctx = document.getElementById("inventoryChart").getContext("2d");
-    let inventoryChart;
+    document.getElementById("itemForm").addEventListener("submit", async function (e) {
+      e.preventDefault();
+      const name = document.getElementById("itemName").value.trim();
+      const qty = parseInt(document.getElementById("quantity").value);
+      if (!name || qty <= 0) return alert("Enter valid input");
 
-    async function fetchInventory() {
-      try {
-        const res = await fetch(apiUrl, {
-          method: "GET",
-          headers: { Authorization: token }
-        });
+      const res = await fetch("http://127.0.0.1:5000/inventory", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ item_name: name, quantity: qty })
+      });
 
-        if (res.status === 401) {
-          alert("Session expired. Please login again.");
-          logout();
-          return;
-        }
-
-        const data = await res.json();
-        const tbody = document.getElementById("inventoryBody");
-        tbody.innerHTML = "";
-
-        const labels = [];
-        const quantities = [];
-
-        data.forEach(([id, name, qty, updated]) => {
-          tbody.innerHTML += `
-            <tr>
-              <td>${id}</td>
-              <td>${name}</td>
-              <td>${qty}</td>
-              <td>${updated}</td>
-            </tr>
-          `;
-
-          labels.push(name);
-          quantities.push(qty);
-        });
-
-        renderChart(labels, quantities);
-      } catch (err) {
-        console.error("Error fetching inventory:", err);
+      if (res.ok) {
+        document.getElementById("itemForm").reset();
+        loadData();
       }
+    });
+
+    async function deleteItem(id) {
+      const res = await fetch("http://127.0.0.1:5000/inventory", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id })
+      });
+      if (res.ok) loadData();
     }
 
-    function renderChart(labels, data) {
-      if (inventoryChart) inventoryChart.destroy(); // Reset previous chart
+    async function loadData() {
+      const res = await fetch("http://127.0.0.1:5000/inventory");
+      const data = await res.json();
+      const tbody = document.getElementById("inventoryTable");
+      tbody.innerHTML = "";
 
-      inventoryChart = new Chart(ctx, {
+      const labels = [], values = [];
+      data.forEach(item => {
+        labels.push(item[1]);
+        values.push(item[2]);
+
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${item[0]}</td>
+          <td>${item[1]}</td>
+          <td>${item[2]}</td>
+          <td><button class="btn btn-sm btn-danger" onclick="deleteItem(${item[0]})">Delete</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      const ctx = document.getElementById("chartCanvas").getContext("2d");
+      if (window.myChart) window.myChart.destroy();
+      window.myChart = new Chart(ctx, {
         type: "bar",
         data: {
-          labels,
+          labels: labels,
           datasets: [{
-            label: "Quantity",
-            data,
-            backgroundColor: "#4e73df",
-            borderRadius: 5,
+            label: "Inventory",
+            data: values,
+            backgroundColor: "#4e73df"
           }]
-        },
-        options: {
-          responsive: true,
-          plugins: {
-            legend: { display: false },
-          },
-          scales: {
-            y: { beginAtZero: true }
-          }
         }
       });
     }
 
-    document.getElementById("addItemForm").addEventListener("submit", async function (e) {
-      e.preventDefault();
-      const name = document.getElementById("itemName").value.trim();
-      const quantity = parseInt(document.getElementById("quantity").value);
-
-      if (!name || isNaN(quantity) || quantity <= 0) {
-        alert("Please enter a valid name and positive quantity.");
-        return;
-      }
-
-      try {
-        const res = await fetch(apiUrl, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: token
-          },
-          body: JSON.stringify({ item_name: name, quantity: quantity })
-        });
-
-        const result = await res.json();
-
-        if (res.ok) {
-          alert("Item added!");
-          document.getElementById("itemName").value = "";
-          document.getElementById("quantity").value = "";
-          fetchInventory();
-        } else {
-          alert(result.error || "Something went wrong.");
-        }
-      } catch (err) {
-        console.error("Error adding item:", err);
-      }
-    });
-
     function logout() {
-      localStorage.removeItem("token");
-      alert("Logged out successfully.");
-      window.location.href = "login.html";
+      localStorage.removeItem("loggedIn");
+      location.href = "login.html";
     }
 
-    window.onload = fetchInventory;
+    loadData();
   </script>
 </body>
 </html>
